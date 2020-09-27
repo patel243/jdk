@@ -1372,6 +1372,11 @@ address TemplateInterpreterGenerator::generate_native_entry(bool synchronized) {
   __ push(dtos);
   __ push(ltos);
 
+  if (UseSVE > 0) {
+    // Make sure that jni code does not change SVE vector length.
+    __ verify_sve_vector_length();
+  }
+
   // change thread state
   __ mov(rscratch1, _thread_in_native_trans);
   __ lea(rscratch2, Address(rthread, JavaThread::thread_state_offset()));
@@ -1580,6 +1585,9 @@ address TemplateInterpreterGenerator::generate_normal_entry(bool synchronized) {
 
   // Make room for locals
   __ sub(rscratch1, esp, r3, ext::uxtx, 3);
+
+  // Padding between locals and fixed part of activation frame to ensure
+  // SP is always 16-byte aligned.
   __ andr(sp, rscratch1, -16);
 
   // r3 - # of additional locals

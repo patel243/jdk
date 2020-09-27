@@ -33,7 +33,6 @@
 #include "jfr/leakprofiler/checkpoint/rootResolver.hpp"
 #include "jfr/utilities/jfrThreadIterator.hpp"
 #include "memory/iterator.hpp"
-#include "memory/universe.hpp"
 #include "oops/klass.hpp"
 #include "oops/oop.hpp"
 #include "prims/jvmtiThreadState.hpp"
@@ -96,8 +95,6 @@ class ReferenceToRootClosure : public StackObj {
   bool _complete;
 
   bool do_cldg_roots();
-  bool do_object_synchronizer_roots();
-  bool do_universe_roots();
   bool do_oop_storage_roots();
   bool do_string_table_roots();
   bool do_aot_loader_roots();
@@ -128,20 +125,6 @@ bool ReferenceToRootClosure::do_cldg_roots() {
   ReferenceLocateClosure rlc(_callback, OldObjectRoot::_class_loader_data, OldObjectRoot::_type_undetermined, NULL);
   CLDToOopClosure cldt_closure(&rlc, ClassLoaderData::_claim_none);
   ClassLoaderDataGraph::always_strong_cld_do(&cldt_closure);
-  return rlc.complete();
-}
-
-bool ReferenceToRootClosure::do_object_synchronizer_roots() {
-  assert(!complete(), "invariant");
-  ReferenceLocateClosure rlc(_callback, OldObjectRoot::_object_synchronizer, OldObjectRoot::_type_undetermined, NULL);
-  ObjectSynchronizer::oops_do(&rlc);
-  return rlc.complete();
-}
-
-bool ReferenceToRootClosure::do_universe_roots() {
-  assert(!complete(), "invariant");
-  ReferenceLocateClosure rlc(_callback, OldObjectRoot::_universe, OldObjectRoot::_type_undetermined, NULL);
-  Universe::oops_do(&rlc);
   return rlc.complete();
 }
 
@@ -177,16 +160,6 @@ bool ReferenceToRootClosure::do_roots() {
 
   if (do_cldg_roots()) {
     _complete = true;
-    return true;
-  }
-
-  if (do_object_synchronizer_roots()) {
-   _complete = true;
-    return true;
-  }
-
-  if (do_universe_roots()) {
-   _complete = true;
     return true;
   }
 

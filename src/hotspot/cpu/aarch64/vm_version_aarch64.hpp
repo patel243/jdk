@@ -27,7 +27,6 @@
 #define CPU_AARCH64_VM_VERSION_AARCH64_HPP
 
 #include "runtime/abstract_vm_version.hpp"
-#include "runtime/globals_extension.hpp"
 #include "utilities/sizes.hpp"
 
 class VM_Version : public Abstract_VM_Version {
@@ -41,6 +40,8 @@ protected:
   static int _revision;
   static int _stepping;
   static bool _dcpop;
+  static int _initial_sve_vector_length;
+
   struct PsrInfo {
     uint32_t dczid_el0;
     uint32_t ctr_el0;
@@ -106,6 +107,7 @@ public:
   static int cpu_variant()                    { return _variant; }
   static int cpu_revision()                   { return _revision; }
   static bool supports_dcpop()                { return _dcpop; }
+  static int get_initial_sve_vector_length()  { return _initial_sve_vector_length; };
   static ByteSize dczid_el0_offset() { return byte_offset_of(PsrInfo, dczid_el0); }
   static ByteSize ctr_el0_offset()   { return byte_offset_of(PsrInfo, ctr_el0); }
   static bool is_zva_enabled() {

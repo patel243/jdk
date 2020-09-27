@@ -52,6 +52,8 @@ void initJvmLauncher() {
     jvmLauncher = AppLauncher()
         .setImageRoot(appImageRoot)
         .addJvmLibName(_T("Contents/Home/lib/libjli.dylib"))
+        // add backup - older version such as JDK11 have it in jli sub-dir
+        .addJvmLibName(_T("Contents/Home/lib/jli/libjli.dylib"))
         .setAppDir(FileUtils::mkpath() << appImageRoot << _T("Contents/app"))
         .setDefaultRuntimePath(FileUtils::mkpath() << appImageRoot
                 << _T("Contents/runtime"))
@@ -65,7 +67,6 @@ void initJvmLauncher() {
 
 
 int main(int argc, char *argv[]) {
-    setlocale(LC_ALL, "en_US.utf8");
     if (jvmLauncher) {
         // This is the call from the thread spawned by JVM.
         // Skip initialization phase as we have done this already in the first

@@ -1751,7 +1751,6 @@ static jvmtiHeapRootKind toJvmtiHeapRootKind(jvmtiHeapReferenceKind kind) {
   switch (kind) {
     case JVMTI_HEAP_REFERENCE_JNI_GLOBAL:   return JVMTI_HEAP_ROOT_JNI_GLOBAL;
     case JVMTI_HEAP_REFERENCE_SYSTEM_CLASS: return JVMTI_HEAP_ROOT_SYSTEM_CLASS;
-    case JVMTI_HEAP_REFERENCE_MONITOR:      return JVMTI_HEAP_ROOT_MONITOR;
     case JVMTI_HEAP_REFERENCE_STACK_LOCAL:  return JVMTI_HEAP_ROOT_STACK_LOCAL;
     case JVMTI_HEAP_REFERENCE_JNI_LOCAL:    return JVMTI_HEAP_ROOT_JNI_LOCAL;
     case JVMTI_HEAP_REFERENCE_THREAD:       return JVMTI_HEAP_ROOT_THREAD;
@@ -3017,20 +3016,13 @@ inline bool VM_HeapWalkOperation::collect_simple_roots() {
     return false;
   }
 
-  // Inflated monitors
-  blk.set_kind(JVMTI_HEAP_REFERENCE_MONITOR);
-  ObjectSynchronizer::oops_do(&blk);
-  if (blk.stopped()) {
-    return false;
-  }
-
   // threads are now handled in collect_stack_roots()
 
   // Other kinds of roots maintained by HotSpot
   // Many of these won't be visible but others (such as instances of important
   // exceptions) will be visible.
   blk.set_kind(JVMTI_HEAP_REFERENCE_OTHER);
-  Universe::oops_do(&blk);
+  Universe::vm_global()->oops_do(&blk);
   if (blk.stopped()) {
     return false;
   }

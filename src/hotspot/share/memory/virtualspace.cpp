@@ -29,6 +29,8 @@
 #include "oops/compressedOops.hpp"
 #include "oops/markWord.hpp"
 #include "oops/oop.inline.hpp"
+#include "runtime/globals_extension.hpp"
+#include "runtime/java.hpp"
 #include "runtime/os.inline.hpp"
 #include "services/memTracker.hpp"
 #include "utilities/align.hpp"

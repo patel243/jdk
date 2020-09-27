@@ -110,15 +110,11 @@ private:
   const bool           _visit_jvmti_weak_export;
   ZJavaThreadsIterator _java_threads_iter;
 
-  void do_universe(ZRootsIteratorClosure* cl);
-  void do_object_synchronizer(ZRootsIteratorClosure* cl);
   void do_jvmti_weak_export(ZRootsIteratorClosure* cl);
   void do_vm_thread(ZRootsIteratorClosure* cl);
   void do_java_threads(ZRootsIteratorClosure* cl);
   void do_code_cache(ZRootsIteratorClosure* cl);
 
-  ZSerialOopsDo<ZRootsIterator, &ZRootsIterator::do_universe>            _universe;
-  ZSerialOopsDo<ZRootsIterator, &ZRootsIterator::do_object_synchronizer> _object_synchronizer;
   ZSerialOopsDo<ZRootsIterator, &ZRootsIterator::do_jvmti_weak_export>   _jvmti_weak_export;
   ZSerialOopsDo<ZRootsIterator, &ZRootsIterator::do_vm_thread>           _vm_thread;
   ZParallelOopsDo<ZRootsIterator, &ZRootsIterator::do_java_threads>      _java_threads;
@@ -170,10 +166,8 @@ public:
 class ZWeakRootsIterator {
 private:
   void do_jvmti_weak_export(BoolObjectClosure* is_alive, ZRootsIteratorClosure* cl);
-  void do_jfr_weak(BoolObjectClosure* is_alive, ZRootsIteratorClosure* cl);
 
   ZSerialWeakOopsDo<ZWeakRootsIterator, &ZWeakRootsIterator::do_jvmti_weak_export> _jvmti_weak_export;
-  ZSerialWeakOopsDo<ZWeakRootsIterator, &ZWeakRootsIterator::do_jfr_weak>          _jfr_weak;
 
 public:
   ZWeakRootsIterator();

@@ -46,6 +46,7 @@
 #include "runtime/arguments.hpp"
 #include "runtime/atomic.hpp"
 #include "runtime/globals.hpp"
+#include "runtime/globals_extension.hpp"
 #include "runtime/interfaceSupport.inline.hpp"
 #include "runtime/init.hpp"
 #include "runtime/java.hpp"
@@ -110,6 +111,9 @@
 # include <inttypes.h>
 # include <sys/ioctl.h>
 # include <linux/elf-em.h>
+#ifdef __GLIBC__
+# include <malloc.h>
+#endif
 
 #ifndef _GNU_SOURCE
   #define _GNU_SOURCE
@@ -318,7 +322,7 @@ bool os::have_special_privileges() {
 
 
 #ifndef SYS_gettid
-// i386: 224, ia64: 1105, amd64: 186, sparc 143
+// i386: 224, ia64: 1105, amd64: 186, sparc: 143
   #ifdef __ia64__
     #define SYS_gettid 1105
   #else
@@ -918,7 +922,17 @@ bool os::create_thread(Thread* thread, ThreadType thr_type,
   assert(is_aligned(stack_size, os::vm_page_size()), "stack_size not aligned");
 
   int status = pthread_attr_setstacksize(&attr, stack_size);
-  assert_status(status == 0, status, "pthread_attr_setstacksize");
+  if (status != 0) {
+    // pthread_attr_setstacksize() function can fail
+    // if the stack size exceeds a system-imposed limit.
+    assert_status(status == EINVAL, status, "pthread_attr_setstacksize");
+    log_warning(os, thread)("The %sthread stack size specified is invalid: " SIZE_FORMAT "k",
+                            (thr_type == compiler_thread) ? "compiler " : ((thr_type == java_thread) ? "" : "VM "),
+                            stack_size / K);
+    thread->set_osthread(NULL);
+    delete osthread;
+    return false;
+  }
 
   ThreadState state;
 
@@ -962,13 +976,6 @@ bool os::create_thread(Thread* thread, ThreadType thr_type,
         sync_with_child->wait_without_safepoint_check();
       }
     }
-  }
-
-  // Aborted due to thread limit being reached
-  if (state == ZOMBIE) {
-    thread->set_osthread(NULL);
-    delete osthread;
-    return false;
   }
 
   // The thread is returned suspended (in state INITIALIZED),
@@ -1027,13 +1034,12 @@ bool os::create_attached_thread(JavaThread* thread) {
     // enabling yellow zone first will crash JVM on SuSE Linux), so there
     // is no gap between the last two virtual memory regions.
 
-    JavaThread *jt = (JavaThread *)thread;
-    address addr = jt->stack_reserved_zone_base();
+    address addr = thread->stack_reserved_zone_base();
     assert(addr != NULL, "initialization problem?");
-    assert(jt->stack_available(addr) > 0, "stack guard should not be enabled");
+    assert(thread->stack_available(addr) > 0, "stack guard should not be enabled");
 
     osthread->set_expanding_stack();
-    os::Linux::manually_expand_stack(jt, addr);
+    os::Linux::manually_expand_stack(thread, addr);
     osthread->clear_expanding_stack();
   }
 
@@ -1768,7 +1774,6 @@ void * os::dll_load(const char *filename, char *ebuf, int ebuflen) {
                 "'execstack -c <libfile>', or link it with '-z noexecstack'.",
                 filename);
 
-        assert(Thread::current()->is_Java_thread(), "must be Java thread");
         JavaThread *jt = JavaThread::current();
         if (jt->thread_state() != _thread_in_native) {
           // This happens when a compiler thread tries to load a hsdis-<arch>.so file
@@ -2156,7 +2161,10 @@ void os::print_os_info(outputStream* st) {
   os::Posix::print_load_average(st);
   st->cr();
 
-  os::Linux::print_full_memory_info(st);
+  os::Linux::print_system_memory_info(st);
+  st->cr();
+
+  os::Linux::print_process_memory_info(st);
   st->cr();
 
   os::Linux::print_proc_sys_info(st);
@@ -2314,7 +2322,7 @@ void os::Linux::print_proc_sys_info(outputStream* st) {
                       "/proc/sys/kernel/pid_max", st);
 }
 
-void os::Linux::print_full_memory_info(outputStream* st) {
+void os::Linux::print_system_memory_info(outputStream* st) {
   _print_ascii_file_h("/proc/meminfo", "/proc/meminfo", st, false);
   st->cr();
 
@@ -2324,6 +2332,63 @@ void os::Linux::print_full_memory_info(outputStream* st) {
                       "/sys/kernel/mm/transparent_hugepage/enabled", st);
   _print_ascii_file_h("/sys/kernel/mm/transparent_hugepage/defrag (defrag/compaction efforts parameter)",
                       "/sys/kernel/mm/transparent_hugepage/defrag", st);
+}
+
+void os::Linux::print_process_memory_info(outputStream* st) {
+
+  st->print_cr("Process Memory:");
+
+  // Print virtual and resident set size; peak values; swap; and for
+  //  rss its components if the kernel is recent enough.
+  ssize_t vmsize = -1, vmpeak = -1, vmswap = -1,
+      vmrss = -1, vmhwm = -1, rssanon = -1, rssfile = -1, rssshmem = -1;
+  const int num_values = 8;
+  int num_found = 0;
+  FILE* f = ::fopen("/proc/self/status", "r");
+  char buf[256];
+  while (::fgets(buf, sizeof(buf), f) != NULL && num_found < num_values) {
+    if ( (vmsize == -1    && sscanf(buf, "VmSize: " SSIZE_FORMAT " kB", &vmsize) == 1) ||
+         (vmpeak == -1    && sscanf(buf, "VmPeak: " SSIZE_FORMAT " kB", &vmpeak) == 1) ||
+         (vmswap == -1    && sscanf(buf, "VmSwap: " SSIZE_FORMAT " kB", &vmswap) == 1) ||
+         (vmhwm == -1     && sscanf(buf, "VmHWM: " SSIZE_FORMAT " kB", &vmhwm) == 1) ||
+         (vmrss == -1     && sscanf(buf, "VmRSS: " SSIZE_FORMAT " kB", &vmrss) == 1) ||
+         (rssanon == -1   && sscanf(buf, "RssAnon: " SSIZE_FORMAT " kB", &rssanon) == 1) ||
+         (rssfile == -1   && sscanf(buf, "RssFile: " SSIZE_FORMAT " kB", &rssfile) == 1) ||
+         (rssshmem == -1  && sscanf(buf, "RssShmem: " SSIZE_FORMAT " kB", &rssshmem) == 1)
+         )
+    {
+      num_found ++;
+    }
+  }
+  st->print_cr("Virtual Size: " SSIZE_FORMAT "K (peak: " SSIZE_FORMAT "K)", vmsize, vmpeak);
+  st->print("Resident Set Size: " SSIZE_FORMAT "K (peak: " SSIZE_FORMAT "K)", vmrss, vmhwm);
+  if (rssanon != -1) { // requires kernel >= 4.5
+    st->print(" (anon: " SSIZE_FORMAT "K, file: " SSIZE_FORMAT "K, shmem: " SSIZE_FORMAT "K)",
+                rssanon, rssfile, rssshmem);
+  }
+  st->cr();
+  if (vmswap != -1) { // requires kernel >= 2.6.34
+    st->print_cr("Swapped out: " SSIZE_FORMAT "K", vmswap);
+  }
+
+  // Print glibc outstanding allocations.
+  // (note: there is no implementation of mallinfo for muslc)
+#ifdef __GLIBC__
+  struct mallinfo mi = ::mallinfo();
+
+  // mallinfo is an old API. Member names mean next to nothing and, beyond that, are int.
+  // So values may have wrapped around. Still useful enough to see how much glibc thinks
+  // we allocated.
+  const size_t total_allocated = (size_t)(unsigned)mi.uordblks;
+  st->print("C-Heap outstanding allocations: " SIZE_FORMAT "K", total_allocated / K);
+  // Since mallinfo members are int, glibc values may have wrapped. Warn about this.
+  if ((vmrss * K) > UINT_MAX && (vmrss * K) > (total_allocated + UINT_MAX)) {
+    st->print(" (may have wrapped)");
+  }
+  st->cr();
+
+#endif // __GLIBC__
+
 }
 
 bool os::Linux::print_ld_preload_file(outputStream* st) {
@@ -3653,6 +3718,10 @@ bool os::pd_release_memory(char* addr, size_t size) {
   return anon_munmap(addr, size);
 }
 
+#ifdef CAN_SHOW_REGISTERS_ON_ASSERT
+extern char* g_assert_poison; // assertion poison page address
+#endif
+
 static bool linux_mprotect(char* addr, size_t size, int prot) {
   // Linux wants the mprotect address argument to be page aligned.
   char* bottom = (char*)align_down((intptr_t)addr, os::Linux::page_size());
@@ -3665,6 +3734,11 @@ static bool linux_mprotect(char* addr, size_t size, int prot) {
   assert(addr == bottom, "sanity check");
 
   size = align_up(pointer_delta(addr, bottom, 1) + size, os::Linux::page_size());
+  // Don't log anything if we're executing in the poison page signal handling
+  // context. It can lead to reentrant use of other parts of the VM code.
+#ifdef CAN_SHOW_REGISTERS_ON_ASSERT
+  if (addr != g_assert_poison)
+#endif
   Events::log(NULL, "Protecting memory [" INTPTR_FORMAT "," INTPTR_FORMAT "] with protection modes %x", p2i(bottom), p2i(bottom+size), prot);
   return ::mprotect(bottom, size, prot) == 0;
 }
@@ -5232,11 +5306,9 @@ void os::Linux::numa_init() {
   } else {
     if ((Linux::numa_max_node() < 1) || Linux::is_bound_to_single_node()) {
       // If there's only one node (they start from 0) or if the process
-      // is bound explicitly to a single node using membind, disable NUMA unless
-      // user explicilty forces NUMA optimizations on single-node/UMA systems
-      UseNUMA = ForceNUMA;
+      // is bound explicitly to a single node using membind, disable NUMA
+      UseNUMA = false;
     } else {
-
       LogTarget(Info,os) log;
       LogStream ls(log);
 

@@ -61,7 +61,7 @@ class SharedClassPathEntry {
   bool   _is_module_path;
   bool   _from_class_path_attr;
   time_t _timestamp;          // jar timestamp,  0 if is directory, modules image or other
-  long   _filesize;           // jar/jimage file size, -1 if is directory, -2 if other
+  int64_t      _filesize;     // jar/jimage file size, -1 if is directory, -2 if other
   Array<char>* _name;
   Array<u1>*   _manifest;
 
@@ -84,7 +84,6 @@ public:
   }
   bool from_class_path_attr() { return _from_class_path_attr; }
   time_t timestamp() const { return _timestamp; }
-  long   filesize()  const { return _filesize; }
   const char* name() const;
   const char* manifest() const {
     return (_manifest == NULL) ? NULL : (const char*)_manifest->data();
@@ -234,6 +233,7 @@ class FileMapHeader: private CDSFileMapHeaderBase {
   bool   _allow_archiving_with_java_agent; // setting of the AllowArchivingWithJavaAgent option
   bool   _use_optimized_module_handling;// No module-relation VM options were specified, so we can skip
                                         // some expensive operations.
+  bool   _use_full_module_graph;        // Can we use the full archived module graph?
   size_t _ptrmap_size_in_bits;          // Size of pointer relocation bitmap
 
   char* from_mapped_offset(size_t offset) const {

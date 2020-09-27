@@ -62,6 +62,12 @@ class ObjectSynchronizer : AllStatic {
     inflate_cause_nof = 7 // Number of causes
   } InflateCause;
 
+  typedef enum {
+    NOT_ENABLED    = 0,
+    FATAL_EXIT     = 1,
+    LOG_WARNING    = 2
+  } SyncDiagnosticOption;
+
   // exit must be implemented non-blocking, since the compiler cannot easily handle
   // deoptimization at monitor exit. Hence, it does not take a Handle argument.
 
@@ -144,9 +150,6 @@ class ObjectSynchronizer : AllStatic {
   static bool request_deflate_idle_monitors();  // for whitebox test support and VM exit logging
   static void set_is_async_deflation_requested(bool new_value) { _is_async_deflation_requested = new_value; }
   static jlong time_since_last_async_deflation_ms();
-  static void oops_do(OopClosure* f);
-  // Process oops in thread local used monitors
-  static void thread_local_used_oops_do(Thread* thread, OopClosure* f);
 
   // debugging
   static void audit_and_print_stats(bool on_exit);
@@ -184,16 +187,13 @@ class ObjectSynchronizer : AllStatic {
   // Function to prepend new blocks to the appropriate lists:
   static void prepend_block_to_lists(PaddedObjectMonitor* new_blk);
 
-  // Process oops in all global used monitors (i.e. moribund thread's monitors)
-  static void global_used_oops_do(OopClosure* f);
-  // Process oops in monitors on the given list
-  static void list_oops_do(ObjectMonitor* list, OopClosure* f);
-
   // Support for SynchronizerTest access to GVars fields:
   static u_char* get_gvars_addr();
   static u_char* get_gvars_hc_sequence_addr();
   static size_t get_gvars_size();
   static u_char* get_gvars_stw_random_addr();
+
+  static void handle_sync_on_primitive_wrapper(Handle obj, Thread* current);
 };
 
 // ObjectLocker enforces balanced locking and can never throw an
