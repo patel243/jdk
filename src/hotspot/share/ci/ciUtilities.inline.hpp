@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2021, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -34,9 +34,8 @@
 #define VM_ENTRY_MARK                       \
   CompilerThread* thread=CompilerThread::current(); \
   ThreadInVMfromNative __tiv(thread);       \
-  ResetNoHandleMark rnhm;                   \
   HandleMarkCleaner __hm(thread);           \
-  Thread* THREAD = thread;                  \
+  JavaThread* THREAD = thread; /* For exception macros. */ \
   debug_only(VMNativeEntryWrapper __vew;)
 
 
@@ -51,13 +50,13 @@
  * removed, causes the NoHandleMark assert to trigger. \
  * debug_only(NoHandleMark __hm();)         \
  */                                         \
-  Thread* THREAD = thread;                  \
+  JavaThread* THREAD = thread; /* For exception macros. */ \
   debug_only(VMNativeEntryWrapper __vew;)
 
 
 #define EXCEPTION_CONTEXT \
-  CompilerThread* thread=CompilerThread::current(); \
-  Thread* THREAD = thread;
+  CompilerThread* thread = CompilerThread::current(); \
+  JavaThread* THREAD = thread; // For exception macros.
 
 
 #define GUARDED_VM_ENTRY(action)            \

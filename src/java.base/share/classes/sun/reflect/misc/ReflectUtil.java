@@ -263,8 +263,7 @@ public final class ReflectUtil {
         if (!Proxy.isProxyClass(cls)) {
             return false;
         }
-        String pkg = cls.getPackageName();
-        return pkg == null || !pkg.startsWith(PROXY_PACKAGE);
+        return !Modifier.isPublic(cls.getModifiers());
     }
 
     /**
@@ -313,12 +312,4 @@ public final class ReflectUtil {
         return false;
     }
 
-    /**
-     * Checks if {@code Class cls} is a VM-anonymous class
-     * as defined by {@link jdk.internal.misc.Unsafe#defineAnonymousClass}
-     * (not to be confused with a Java Language anonymous inner class).
-     */
-    public static boolean isVMAnonymousClass(Class<?> cls) {
-        return cls.getName().indexOf('/') > -1;
-    }
 }

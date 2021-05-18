@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2021, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -449,14 +449,6 @@ final class HotSpotResolvedObjectTypeImpl extends HotSpotResolvedJavaType implem
     }
 
     @Override
-    public ResolvedJavaType getHostClass() {
-        if (isArray()) {
-            return null;
-        }
-        return compilerToVM().getHostClass(this);
-    }
-
-    @Override
     public boolean isJavaLangObject() {
         return getName().equals("Ljava/lang/Object;");
     }
@@ -478,6 +470,11 @@ final class HotSpotResolvedObjectTypeImpl extends HotSpotResolvedJavaType implem
         }
         if (!method.getDeclaringClass().isAssignableFrom(this)) {
             return null;
+        }
+        if (method.isConstructor()) {
+            // Constructor calls should have been checked in the verifier and method's
+            // declaring class is assignable from this (see above) so treat it as resolved.
+            return method;
         }
         HotSpotResolvedJavaMethodImpl hotSpotMethod = (HotSpotResolvedJavaMethodImpl) method;
         HotSpotResolvedObjectTypeImpl hotSpotCallerType = (HotSpotResolvedObjectTypeImpl) callerType;
@@ -1031,17 +1028,8 @@ final class HotSpotResolvedObjectTypeImpl extends HotSpotResolvedJavaType implem
         return (getAccessFlags() & config().jvmAccIsCloneableFast) != 0;
     }
 
-    JavaConstant readFieldValue(HotSpotResolvedJavaField field, boolean isVolatile) {
-        return runtime().reflection.readFieldValue(this, field, isVolatile);
-    }
-
     private int getMiscFlags() {
         return UNSAFE.getInt(getMetaspaceKlass() + config().instanceKlassMiscFlagsOffset);
-    }
-
-    @Override
-    public boolean isUnsafeAnonymous() {
-        return (getMiscFlags() & config().instanceKlassMiscIsUnsafeAnonymous) != 0;
     }
 
 }

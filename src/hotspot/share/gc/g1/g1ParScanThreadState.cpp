@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2021, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -32,6 +32,7 @@
 #include "gc/g1/g1StringDedup.hpp"
 #include "gc/g1/g1Trace.hpp"
 #include "gc/shared/partialArrayTaskStepper.inline.hpp"
+#include "gc/shared/stringdedup/stringDedup.hpp"
 #include "gc/shared/taskqueue.inline.hpp"
 #include "memory/allocation.inline.hpp"
 #include "oops/access.inline.hpp"
@@ -57,7 +58,7 @@ G1ParScanThreadState::G1ParScanThreadState(G1CollectedHeap* g1h,
                                            size_t optional_cset_length)
   : _g1h(g1h),
     _task_queue(g1h->task_queue(worker_id)),
-    _rdcq(rdcqs),
+    _rdc_local_qset(rdcqs),
     _ct(g1h->card_table()),
     _closures(NULL),
     _plab_allocator(NULL),
@@ -75,6 +76,7 @@ G1ParScanThreadState::G1ParScanThreadState(G1CollectedHeap* g1h,
     _old_gen_is_full(false),
     _partial_objarray_chunk_size(ParGCArrayScanChunk),
     _partial_array_stepper(n_workers),
+    _string_dedup_requests(),
     _num_optional_regions(optional_cset_length),
     _numa(g1h->numa()),
     _obj_alloc_stat(NULL)
@@ -105,7 +107,7 @@ G1ParScanThreadState::G1ParScanThreadState(G1CollectedHeap* g1h,
 }
 
 size_t G1ParScanThreadState::flush(size_t* surviving_young_words) {
-  _rdcq.flush();
+  _rdc_local_qset.flush();
   flush_numa_stats();
   // Update allocation statistics.
   _plab_allocator->flush_and_retire_stats();
@@ -193,9 +195,9 @@ void G1ParScanThreadState::do_oop_evac(T* p) {
     return;
   }
 
-  markWord m = obj->mark_raw();
+  markWord m = obj->mark();
   if (m.is_marked()) {
-    obj = (oop) m.decode_pointer();
+    obj = cast_to_oop(m.decode_pointer());
   } else {
     obj = do_copy_to_survivor_space(region_attr, obj, m);
   }
@@ -465,7 +467,7 @@ oop G1ParScanThreadState::do_copy_to_survivor_space(G1HeapRegionAttr const regio
   // We're going to allocate linearly, so might as well prefetch ahead.
   Prefetch::write(obj_ptr, PrefetchCopyIntervalInBytes);
 
-  const oop obj = oop(obj_ptr);
+  const oop obj = cast_to_oop(obj_ptr);
   const oop forward_ptr = old->forward_to_atomic(obj, old_mark, memory_order_relaxed);
   if (forward_ptr == NULL) {
     Copy::aligned_disjoint_words(cast_from_oop<HeapWord*>(old), obj_ptr, word_sz);
@@ -482,18 +484,17 @@ oop G1ParScanThreadState::do_copy_to_survivor_space(G1HeapRegionAttr const regio
         age++;
       }
       if (old_mark.has_displaced_mark_helper()) {
-        // In this case, we have to install the mark word first,
-        // otherwise obj looks to be forwarded (the old mark word,
-        // which contains the forward pointer, was copied)
-        obj->set_mark_raw(old_mark);
+        // In this case, we have to install the old mark word containing the
+        // displacement tag, and update the age in the displaced mark word.
         markWord new_mark = old_mark.displaced_mark_helper().set_age(age);
         old_mark.set_displaced_mark_helper(new_mark);
+        obj->set_mark(old_mark);
       } else {
-        obj->set_mark_raw(old_mark.set_age(age));
+        obj->set_mark(old_mark.set_age(age));
       }
       _age_table.add(age, word_sz);
     } else {
-      obj->set_mark_raw(old_mark);
+      obj->set_mark(old_mark);
     }
 
     // Most objects are not arrays, so do one array check rather than
@@ -510,21 +511,18 @@ oop G1ParScanThreadState::do_copy_to_survivor_space(G1HeapRegionAttr const regio
       return obj;
     }
 
-    if (G1StringDedup::is_enabled()) {
-      const bool is_from_young = region_attr.is_young();
-      const bool is_to_young = dest_attr.is_young();
-      assert(is_from_young == from_region->is_young(),
-             "sanity");
-      assert(is_to_young == _g1h->heap_region_containing(obj)->is_young(),
-             "sanity");
-      G1StringDedup::enqueue_from_evacuation(is_from_young,
-                                             is_to_young,
-                                             _worker_id,
-                                             obj);
+    // Check for deduplicating young Strings.
+    if (G1StringDedup::is_candidate_from_evacuation(klass,
+                                                    region_attr,
+                                                    dest_attr,
+                                                    age)) {
+      // Record old; request adds a new weak reference, which reference
+      // processing expects to refer to a from-space object.
+      _string_dedup_requests.add(old);
     }
 
     G1ScanInYoungSetter x(&_scanner, dest_attr.is_young());
-    obj->oop_iterate_backwards(&_scanner);
+    obj->oop_iterate_backwards(&_scanner, klass);
     return obj;
 
   } else {
@@ -607,9 +605,9 @@ oop G1ParScanThreadState::handle_evacuation_failure_par(oop old, markWord m) {
     // Forward-to-self succeeded. We are the "owner" of the object.
     HeapRegion* r = _g1h->heap_region_containing(old);
 
-    if (!r->evacuation_failed()) {
-      r->set_evacuation_failed(true);
-     _g1h->hr_printer()->evac_failure(r);
+    if (r->set_evacuation_failed()) {
+      _g1h->notify_region_failed_evacuation();
+      _g1h->hr_printer()->evac_failure(r);
     }
 
     _g1h->preserve_mark_during_evac_failure(_worker_id, old, m);
